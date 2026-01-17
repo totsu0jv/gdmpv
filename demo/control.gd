@@ -1,14 +1,13 @@
 extends Control
 @onready var mpv_player: MPVPlayer = $MPVPlayer
+@onready var texture_rect: TextureRect = $TextureRect
 
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
-	#await mpv_player.initialized
-	mpv_player.load_file("https://private-user-images.githubusercontent.com/71902025/139560384-f78c5577-77e3-4495-b005-77e4439f8784.mp4?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3Njg2MTA2NDMsIm5iZiI6MTc2ODYxMDM0MywicGF0aCI6Ii83MTkwMjAyNS8xMzk1NjAzODQtZjc4YzU1NzctNzdlMy00NDk1LWIwMDUtNzdlNDQzOWY4Nzg0Lm1wND9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAxMTclMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMTE3VDAwMzkwM1omWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTQxZmFkZGE0ZWUyMjU0MGNmNzNlYzE3YTdiNWRhMGIzNTMxNDFiNzgwYzllNzllZmVjMjJhOWJkYWU0ZmYxODUmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.Xh6gptjl6xwYoZSfIDN8K47GOGlN5vy67aLSfIdwbyY")
-	mpv_player.play()
-
+	mpv_player.load_file("http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(delta: float) -> void:
-	pass
+	if not texture_rect.texture:
+		mpv_player.set_target_texture_rect(texture_rect)
