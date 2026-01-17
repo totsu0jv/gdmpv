@@ -505,6 +505,15 @@ void MPVPlayer::set_audio_track(String id) {
 	mpv_command_async(mpv, 0, cmd);
 }
 
+void MPVPlayer::set_subtitle_track(String id) {
+	if (!mpv) {
+		ERR_PRINT("MPV not initialized");
+		return;
+	}
+	const char *cmd[] = { "set", "sid", id.utf8().get_data(), nullptr };
+	mpv_command_async(mpv, 0, cmd);
+}
+
 double MPVPlayer::get_duration() const {
 	if (!mpv)
 		return 0.0;
@@ -766,7 +775,6 @@ void MPVPlayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_time_pos"), &MPVPlayer::get_time_pos);
 	ClassDB::bind_method(D_METHOD("get_percentage_pos"), &MPVPlayer::get_percentage_pos);
 
-	ClassDB::bind_method(D_METHOD("set_audio_track", "id"), &MPVPlayer::set_audio_track);
 
 	ClassDB::bind_method(D_METHOD("set_subtitle_delay", "seconds"), &MPVPlayer::set_subtitle_delay);
 	ClassDB::bind_method(D_METHOD("get_subtitle_delay"), &MPVPlayer::get_subtitle_delay);
@@ -780,7 +788,8 @@ void MPVPlayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_subtitle_file", "path", "title", "lang"), &MPVPlayer::add_subtitle_file, DEFVAL(""), DEFVAL(""));
 	ClassDB::bind_method(D_METHOD("restart"), &MPVPlayer::pause);
 
-
+	ClassDB::bind_method(D_METHOD("set_audio_track", "id"), &MPVPlayer::set_audio_track);
+	ClassDB::bind_method(D_METHOD("set_subtitle_track", "id"), &MPVPlayer::set_subtitle_track);
 
 	// Properties
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "volume", PROPERTY_HINT_RANGE, "0,100"), "set_volume", "get_volume");
