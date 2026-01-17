@@ -2,6 +2,10 @@
 *.gen.*
 .godot/
 
+/out/
+.vs/
+build/
+
 # Ignore library files but not the gdextension file
 demo/bin/*
 !demo/bin/android
