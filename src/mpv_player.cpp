@@ -10,8 +10,8 @@ MPVPlayer::MPVPlayer() :
 	mpv_gl = nullptr;
 	current_time = 0.0;
 	duration = 0.0;
-	video_width = 0;
-	video_height = 0;
+	video_width = 1920;
+	video_height = 1080;
 
 
 	set_process(true);
@@ -156,7 +156,9 @@ void MPVPlayer::update_frame() {
 	}
 
 	// Update dimensions if changed
+	bool size_changed = false;
 	if (video_width != (int)width || video_height != (int)height) {
+		size_changed = true;
 		video_width = (int)width;
 		video_height = (int)height;
 		UtilityFunctions::print(vformat("MPV: Video size: %dx%d", video_width, video_height));
@@ -188,21 +190,15 @@ void MPVPlayer::update_frame() {
 		return;
 	}
 
-	// Update texture
-	if (image.is_null()) {
-		image.instantiate();
-		UtilityFunctions::print("MPV: Image instance created");
-	}
-
 	image->set_data(video_width, video_height, false, Image::FORMAT_RGBA8, frame_buffer);
+	if (size_changed) {
+		texture->set_image(image);
+		UtilityFunctions::print("MPV: Texture size updated");
+	} else {
+		texture->update(image);
 
-	if (texture.is_null()) {
-		texture.instantiate();
-		UtilityFunctions::print("MPV: Texture instance created");
 	}
 
-	texture->set_image(image);
-	queue_redraw();
 }
 
 void MPVPlayer::_notification(int p_what) {
@@ -237,7 +233,7 @@ void MPVPlayer::_notification(int p_what) {
 					case MPV_EVENT_FILE_LOADED:
 						duration = get_mpv_property("duration").operator double();
 						UtilityFunctions::print(vformat("MPV: File loaded, duration: %f", duration));
-						emit_signal("file_loaded");
+						call_deferred("file_loaded");
 						break;
 					case MPV_EVENT_LOG_MESSAGE: {
 						mpv_event_log_message *msg = (mpv_event_log_message *)event->data;
@@ -307,13 +303,19 @@ void MPVPlayer::_notification(int p_what) {
 						break;
 					}
 					default:
-						break;
+					break;
 				}
 			}
 			break;
 		} 
 	}
 }
+
+void MPVPlayer::_ready() {
+	image = Image::create_empty(video_width, video_height, false, Image::FORMAT_RGBA8);
+	texture = ImageTexture::create_from_image(image);
+}
+
 
 void MPVPlayer::_process(double delta) {
 	// Check if we need to update the texture
@@ -352,8 +354,8 @@ void MPVPlayer::load_file(const String &p_path) {
 	}
 
 	// Observe time position and pause state
-	mpv_observe_property(mpv, 0, "time-pos", MPV_FORMAT_DOUBLE);
-	mpv_observe_property(mpv, 1, "pause", MPV_FORMAT_FLAG);
+	//mpv_observe_property(mpv, 0, "time-pos", MPV_FORMAT_DOUBLE);
+	//mpv_observe_property(mpv, 1, "pause", MPV_FORMAT_FLAG);
 
 	UtilityFunctions::print("MPV: Load command sent successfully");
 }
@@ -378,6 +380,10 @@ void MPVPlayer::stop() {
 	const char *cmd[] = { "stop", nullptr };
 	mpv_command(mpv, cmd);
 	current_time = 0.0;
+
+	memset(frame_buffer.ptrw(), 0, frame_buffer.size());
+	image->fill(godot::Color(0,0,0));
+	texture->update(image);
 }
 
 void MPVPlayer::seek(String seconds, bool relative) {
