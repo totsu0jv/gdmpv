@@ -52,6 +52,7 @@ public:
 	~MPVPlayer() override;
 
 	virtual void _process(double delta) override;
+	virtual void _ready() override;
 
 
 	// Playback control
