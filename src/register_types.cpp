@@ -6,6 +6,7 @@
 #include <godot_cpp/godot.hpp>
 
 #include "mpv_player.h"
+#include "thumnail_player.h"
 
 using namespace godot;
 
@@ -16,6 +17,7 @@ void initialize_godot_mpv_module(ModuleInitializationLevel p_level) {
 	}
 
 	ClassDB::register_class<MPVPlayer>();
+	ClassDB::register_class<ThumbnailPlayer>();
 }
 
 void uninitialize_godot_mpv_module(ModuleInitializationLevel p_level) {

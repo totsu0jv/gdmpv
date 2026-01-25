@@ -150,6 +150,8 @@ target_sources(${LIBNAME}
     src/register_types.h
     src/mpv_player.cpp
     src/mpv_player.h
+    src/thumnail_player.cpp
+    src/thumnail_player.h
 )
 
 # Add MPV include directories and libraries

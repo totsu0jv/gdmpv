@@ -48,13 +48,13 @@ void MPVPlayer::initialize_mpv() {
 	}
 
 	// Try to enable hardware decoding
-	ret = mpv_set_option_string(mpv, "hwdec", "auto-safe");
+	ret = mpv_set_option_string(mpv, "hwdec", "auto");
 	if (ret < 0) {
 		UtilityFunctions::push_warning("MPV: Failed to set hwdec");
 	}
 
 	// Audio settings
-	ret = mpv_set_option_string(mpv, "audio-client-name", "Godot MPV Player");
+	ret = mpv_set_option_string(mpv, "audio-client-name", "MPV");
 
 	// Keep audio device open
 	ret = mpv_set_option_string(mpv, "keep-open", "yes");
@@ -224,7 +224,7 @@ void MPVPlayer::_notification(int p_what) {
 						mpv_event_end_file *ef = (mpv_event_end_file *)event->data;
 						UtilityFunctions::print(vformat("MPV: End file, reason: %d", ef->reason));
 						if (ef->reason == MPV_END_FILE_REASON_EOF) {
-							call_deferred("playback_finished");
+							call_deferred("emit_signal", "playback_finished");
 						} else if (ef->reason == MPV_END_FILE_REASON_ERROR) {
 							UtilityFunctions::push_error(vformat("MPV: Playback error: %s", mpv_error_string(ef->error)));
 						}
@@ -233,7 +233,7 @@ void MPVPlayer::_notification(int p_what) {
 					case MPV_EVENT_FILE_LOADED:
 						duration = get_mpv_property("duration").operator double();
 						UtilityFunctions::print(vformat("MPV: File loaded, duration: %f", duration));
-						call_deferred("file_loaded");
+						call_deferred("emit_signal", "file_loaded");
 						break;
 					case MPV_EVENT_LOG_MESSAGE: {
 						mpv_event_log_message *msg = (mpv_event_log_message *)event->data;
