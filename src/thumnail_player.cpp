@@ -38,11 +38,14 @@ ThumbnailPlayer::ThumbnailPlayer() {
     int err = mpv_render_context_create(&mpv_ctx, mpv, params);
     ERR_FAIL_COND(err < 0);
 
-    mpv_set_wakeup_callback(mpv, &ThumbnailPlayer::mpv_wakeup, this);
+    //mpv_set_wakeup_callback(mpv, &ThumbnailPlayer::mpv_wakeup, this);
 
     stride = width * 4;
     pixel_data.resize(stride * height);
 
+
+    transparent_tex = ImageTexture::create_from_image(Image::create_empty(width, height, false, Image::FORMAT_RGBA8));
+    transparent_tex->get_image()->fill(Color(0,0,0,0));
     //texture.instantiate();
 }
 
@@ -60,6 +63,8 @@ ThumbnailPlayer::~ThumbnailPlayer() {
 bool ThumbnailPlayer::open(String path) {
     if (!mpv) return false;
 
+    clear();
+
     CharString p = path.utf8();
     const char *cmd[] = {
         "loadfile",
@@ -73,78 +78,94 @@ bool ThumbnailPlayer::open(String path) {
     return mpv_command(mpv, cmd) >= 0;
 }
 
-int ThumbnailPlayer::quantize(double t) const {
-    return int(Math::floor(t / BUCKET_SEC));
-}
+void ThumbnailPlayer::clear() {
+    ready.reset();
+    generation_order.clear();
+    gen_cursor = 0;
+    generating = false;
 
-void ThumbnailPlayer::touch_cache(int bucket) {
-    lru.erase(std::remove(lru.begin(), lru.end(), bucket), lru.end());
-    lru.push_front(bucket);
-}
-
-void ThumbnailPlayer::evict_if_needed() {
-    while ((int)lru.size() > MAX_CACHE) {
-        int old = lru.back();
-        lru.pop_back();
-        cache.erase(old);
+    for (auto &t : thumbs) {
+        t.unref();
     }
+
 }
 
-void ThumbnailPlayer::request_thumbnail(double time_sec) {
+int ThumbnailPlayer::find_nearest_ready(int index) const {
+    if (index < 0 || index >= THUMB_COUNT)
+        return -1;
+
+    if (ready.test(index))
+        return index;
+
+    int max_dist = 3;
+
+    for (int d = 1; d <= max_dist; d++) {
+        int l = index - d;
+        int r = index + d;
+
+        if (l >= 0 && ready.test(l))
+            return l;
+        if (r < THUMB_COUNT && ready.test(r))
+            return r;
+    }
+
+    return -1;
+}
+
+
+
+void ThumbnailPlayer::start_generation() {
+    generation_order.clear();
+
+    for (int i = 0; i < THUMB_COUNT; i += 2)
+        generation_order.push_back(i);
+
+    for (int i = 1; i < THUMB_COUNT; i += 2)
+        generation_order.push_back(i);
+
+    gen_cursor = 0;
+    generating = true;
+
+    seek_to_bucket(generation_order[0]);
+}
+
+void ThumbnailPlayer::request_thumbnail(int percentage) {
     if (!mpv) return;
-
-    int bucket = quantize(time_sec);
-
-    // cache hit
-    auto it = cache.find(bucket);
-    if (it != cache.end()) {
-        texture = it->second;
-        touch_cache(bucket);
-        return;
-    }
 
     double now = Time::get_singleton()->get_ticks_msec() / 1000.0;
     if (now - last_seek_wallclock < MIN_SEEK_INTERVAL)
         return;
 
     last_seek_wallclock = now;
-    current_bucket = bucket;
-    frame_ready = false;
 
-    double seek_time = bucket * BUCKET_SEC;
+    int nearest = find_nearest_ready(percentage);
+
+    if (nearest == -1) {
+        emit_signal("thumbnail_generated", transparent_tex);
+        return;
+    }
+
+    emit_signal("thumbnail_generated", thumbs[nearest]);
+}
+
+void ThumbnailPlayer::seek_to_bucket(int bucket) {
+    //double t = duration * (double(bucket) / (THUMB_COUNT - 1));
 
     const char *cmd[] = {
         "seek",
-        String::num(seek_time).utf8().get_data(),
+        String::num(bucket).utf8().get_data(),
         "absolute-percent+keyframes",
         nullptr
     };
 
-    UtilityFunctions::print(vformat("ThumbnailPlayer: Seeking to %f percent (bucket %d)", seek_time, bucket));
-
     mpv_command_async(mpv, 0, cmd);
 }
 
-void ThumbnailPlayer::mpv_wakeup(void *userdata) {
-    ThumbnailPlayer *self =
-        static_cast<ThumbnailPlayer *>(userdata);
-
-    UtilityFunctions::print("ThumbnailPlayer: mpv_wakeup called");
-
-    if (self) {
-        self->on_mpv_wakeup();
-    }
-}
-
-void ThumbnailPlayer::on_mpv_wakeup() {
-    UtilityFunctions::print("ThumbnailPlayer: on_mpv_wakeup called");
-    mpv_events_pending = true;
-}
 
 
 void ThumbnailPlayer::_bind_methods() {
     ClassDB::bind_method(D_METHOD("open", "path"), &ThumbnailPlayer::open);
-    ClassDB::bind_method(D_METHOD("request_thumbnail", "time_sec"), &ThumbnailPlayer::request_thumbnail);
+    ClassDB::bind_method(D_METHOD("request_thumbnail", "percentage"), &ThumbnailPlayer::request_thumbnail);
     //ClassDB::bind_method(D_METHOD("update"), &ThumbnailPlayer::update);
     //ClassDB::bind_method(D_METHOD("get_texture"), &ThumbnailPlayer::get_texture);
 
@@ -166,6 +187,7 @@ void ThumbnailPlayer::poll_events() {
 
         case MPV_EVENT_FILE_LOADED:
             // ready to seek
+            start_generation();
             break;
 
         case MPV_EVENT_SEEK:
@@ -192,8 +214,30 @@ void ThumbnailPlayer::poll_events() {
 void ThumbnailPlayer::_process(double delta) {
     poll_events();
 
-    if (!frame_ready || current_bucket < 0)
+    if (!frame_ready || !generating)
         return;
+
+    frame_ready = false;
+
+    int bucket = generation_order[gen_cursor];
+
+    render_into_texture(bucket);
+    //ready.set(bucket);
+
+    gen_cursor++;
+
+    if (gen_cursor < generation_order.size()) {
+        seek_to_bucket(generation_order[gen_cursor]);
+    } else {
+        generating = false;
+    }
+
+}
+
+void ThumbnailPlayer::render_into_texture(int index) {
+    if (!mpv_ctx)
+        return;
+
     int size[2] = { width, height };
     int stride = width * 4;
 	const char *format = "rgba";
@@ -208,19 +252,26 @@ void ThumbnailPlayer::_process(double delta) {
 
     mpv_render_context_render(mpv_ctx, params);
 
-	image->set_data(width, height, false, Image::FORMAT_RGBA8, pixel_data);
+    Ref<Image> img = Image::create_from_data(
+        width,
+        height,
+        false,
+        Image::FORMAT_RGBA8,
+        pixel_data
+    );
 
+    Ref<ImageTexture> tex;
+    if (thumbs[index].is_valid()) {
+        tex = thumbs[index];
+        tex->set_image(img);
+    } else {
+        tex = ImageTexture::create_from_image(img);
+        thumbs[index] = tex;
+    }
 
-    cache[current_bucket] = texture;
-    touch_cache(current_bucket);
-    evict_if_needed();
-
-    texture->set_image(image);
-    current_bucket = -1;
-    frame_ready = false;
-
-    emit_signal("thumbnail_generated", texture);
+    ready.set(index);
 }
+
 
 void ThumbnailPlayer::_ready() {
 	image = Image::create_empty(width, height, false, Image::FORMAT_RGBA8);
