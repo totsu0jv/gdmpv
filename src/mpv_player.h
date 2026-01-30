@@ -3,7 +3,7 @@
 #include <mpv/client.h>
 #include <mpv/render.h>
 #include <mpv/render_gl.h>
-#include <godot_cpp/classes/control.hpp>
+#include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -14,8 +14,8 @@
 
 using namespace godot;
 
-class MPVPlayer : public Control {
-	GDCLASS(MPVPlayer, Control)
+class MPVPlayer : public godot::Node {
+	GDCLASS(MPVPlayer, godot::Node)
 
 private:
 	mpv_handle *mpv;
