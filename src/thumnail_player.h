@@ -8,9 +8,8 @@
 #include <mpv/client.h>
 #include <mpv/render.h>
 
-#include <unordered_map>
-#include <deque>
-#include <algorithm>
+#include <bitset>
+#include <vector>
 
 using namespace godot;
 
@@ -23,20 +22,19 @@ private:
     double last_seek_time_sec = -1000.0;
     double last_seek_wallclock = 0.0;
 
-    // --- cache ---
-    std::unordered_map<int, Ref<Texture2D>> cache;
-    std::deque<int> lru;
+    static constexpr int THUMB_COUNT = 100;
 
-    int current_bucket = -1;
 
-    // helpers
-    int quantize(double t) const;
-    void touch_cache(int bucket);
-    void evict_if_needed();
+    std::array<Ref<ImageTexture>, THUMB_COUNT> thumbs;
+    std::bitset<THUMB_COUNT> ready;
 
-    static constexpr double BUCKET_SEC = 1.0;     // quantization
-    static constexpr double MIN_SEEK_INTERVAL = 0.25; // hard limit
-    static constexpr int    MAX_CACHE = 64;       // thumbnails
+    std::vector<int> generation_order;
+    int gen_cursor = 0;
+    bool generating = false;
+
+
+    static constexpr double MIN_SEEK_INTERVAL = 0.05; // hard limit
+    //static constexpr double MIN_SEEK_INTERVAL = 0.25; // hard limit
 
     
     // mpv
@@ -46,12 +44,9 @@ private:
     bool mpv_events_pending = false;
     bool frame_ready = false;
 
-    static void mpv_wakeup(void *userdata);
-    void on_mpv_wakeup();
-
     // thumbnail state
-    int width = 256;
-    int height = 144;
+    int width = 128;
+    int height = 72;
     int stride = 0;
 
     double requested_time = -1.0;
@@ -59,10 +54,20 @@ private:
 
     bool frame_dirty = false;
 
+    
+    
+    int find_nearest_ready(int percentage) const;
+    void start_generation();
+    void seek_to_bucket(int bucket);
+    void render_into_texture(int bucket);
+    void clear();
+
     // buffers
     PackedByteArray pixel_data;
     Ref<ImageTexture> texture;
 	Ref<Image> image;
+    Ref<ImageTexture> transparent_tex;
+
 
 protected:
     static void _bind_methods();
@@ -76,9 +81,10 @@ public:
 	virtual void _ready() override;
     virtual void _process(double delta) override;
 
-    void request_thumbnail(double time_sec);
+    void request_thumbnail(int percentage);
     //bool update(); // call from _process
     void poll_events();
+
 
     Ref<Texture2D> get_texture() const;
 };
