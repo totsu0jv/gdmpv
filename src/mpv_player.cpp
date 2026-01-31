@@ -12,6 +12,7 @@ MPVPlayer::MPVPlayer() :
 	duration = 0.0;
 	video_width = 1920;
 	video_height = 1080;
+	size_changed = false;
 
 
 	set_process(true);
@@ -138,37 +139,36 @@ void MPVPlayer::update_frame() {
 		return;
 	}
 
-	// Get video dimensions
-	Variant width_var = get_mpv_property("width");
-	Variant height_var = get_mpv_property("height");
+	if (size_changed) {
+		Variant width_var = get_mpv_property("width");
+		Variant height_var = get_mpv_property("height");
 
-	if (width_var.get_type() == Variant::NIL || height_var.get_type() == Variant::NIL) {
-		UtilityFunctions::push_warning("MPV: Video dimensions not available yet");
-		return;
-	}
+		if (width_var.get_type() == Variant::NIL || height_var.get_type() == Variant::NIL) {
+			UtilityFunctions::push_warning("MPV: Video dimensions not available yet");
+			return;
+		}
 
-	int64_t width = width_var.operator int64_t();
-	int64_t height = height_var.operator int64_t();
+		int64_t width = width_var.operator int64_t();
+		int64_t height = height_var.operator int64_t();
 
-	if (width <= 0 || height <= 0) {
-		UtilityFunctions::push_warning(vformat("MPV: Invalid video dimensions: %dx%d", width, height));
-		return;
-	}
+		if (width <= 0 || height <= 0) {
+			UtilityFunctions::push_warning(vformat("MPV: Invalid video dimensions: %dx%d", width, height));
+			return;
+		}
 
-	// Update dimensions if changed
-	bool size_changed = false;
-	if (video_width != (int)width || video_height != (int)height) {
-		size_changed = true;
-		video_width = (int)width;
-		video_height = (int)height;
-		UtilityFunctions::print(vformat("MPV: Video size: %dx%d", video_width, video_height));
-	}
+		// Update dimensions if changed
+		if (video_width != (int)width || video_height != (int)height) {
+			video_width = (int)width;
+			video_height = (int)height;
+			UtilityFunctions::print(vformat("MPV: Video size: %dx%d", video_width, video_height));
+		}
 
-	// Prepare frame buffer
-	int frame_size = video_width * video_height * 4; // RGBA
-	if (frame_buffer.size() != frame_size) {
-		frame_buffer.resize(frame_size);
-		UtilityFunctions::print(vformat("MPV: Frame buffer resized to %d bytes", frame_size));
+		// Prepare frame buffer
+		int frame_size = video_width * video_height * 4; // RGBA
+		if (frame_buffer.size() != frame_size) {
+			frame_buffer.resize(frame_size);
+			UtilityFunctions::print(vformat("MPV: Frame buffer resized to %d bytes", frame_size));
+		}
 	}
 
 	// Render frame - use proper lvalue variables
@@ -194,9 +194,9 @@ void MPVPlayer::update_frame() {
 	if (size_changed) {
 		texture->set_image(image);
 		UtilityFunctions::print("MPV: Texture size updated");
+		size_changed = false;
 	} else {
 		texture->update(image);
-
 	}
 
 }
@@ -245,6 +245,7 @@ void MPVPlayer::_notification(int p_what) {
 						break;
 					case MPV_EVENT_VIDEO_RECONFIG:
 						UtilityFunctions::print("MPV: Video reconfigured");
+						size_changed = true;
 						break;
 					case MPV_EVENT_AUDIO_RECONFIG:
 						UtilityFunctions::print("MPV: Audio reconfigured");
@@ -318,6 +319,8 @@ void MPVPlayer::_ready() {
 
 
 void MPVPlayer::_process(double delta) {
+	if (!image.is_valid() || !texture.is_valid())
+    	return;
 	// Check if we need to update the texture
 	if (texture_needs_update.load()) {
 		// Reset the flag at the beginning to avoid missing frames
@@ -492,9 +495,13 @@ void MPVPlayer::execute_mpv_command(const PackedStringArray &p_command) {
 	if (!mpv || p_command.size() == 0)
 		return;
 
+	Vector<CharString> strings;
+	strings.resize(p_command.size());
+
 	const char **cmd = new const char *[p_command.size() + 1];
 	for (int i = 0; i < p_command.size(); i++) {
-		cmd[i] = p_command[i].utf8().get_data();
+	    strings.write[i] = p_command[i].utf8();
+	    cmd[i] = strings[i].get_data();
 	}
 	cmd[p_command.size()] = nullptr;
 
@@ -792,7 +799,6 @@ void MPVPlayer::_bind_methods() {
 	//ClassDB::bind_method(D_METHOD("set_playback_speed", "speed"), &MPVPlayer::set_playback_speed);
 	ClassDB::bind_method(D_METHOD("set_native_subtitles_enabled", "enabled"), &MPVPlayer::set_native_subtitles_enabled);
 	ClassDB::bind_method(D_METHOD("add_subtitle_file", "path", "title", "lang"), &MPVPlayer::add_subtitle_file, DEFVAL(""), DEFVAL(""));
-	ClassDB::bind_method(D_METHOD("restart"), &MPVPlayer::pause);
 
 	ClassDB::bind_method(D_METHOD("set_audio_track", "id"), &MPVPlayer::set_audio_track);
 	ClassDB::bind_method(D_METHOD("set_subtitle_track", "id"), &MPVPlayer::set_subtitle_track);
