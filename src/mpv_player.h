@@ -27,7 +27,8 @@ private:
 	double duration;
 	int video_width;
 	int video_height;
-
+	
+	bool size_changed;
 	TextureRect *target_texture_rect = nullptr;
     std::atomic<bool> texture_needs_update{ false };
 	bool is_buffering = false;
