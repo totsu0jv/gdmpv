@@ -154,6 +154,16 @@ target_sources(${LIBNAME}
     src/thumnail_player.h
 )
 
+# === Vulkan ===
+if(DEFINED ENV{VULKAN_SDK})
+    set(Vulkan_ROOT "$ENV{VULKAN_SDK}")
+endif()
+
+
+find_package(Vulkan REQUIRED)
+target_link_libraries(${LIBNAME} PRIVATE Vulkan::Vulkan)
+
+
 # Add MPV include directories and libraries
 if(MPV_FOUND)
     target_include_directories(${LIBNAME} PRIVATE ${MPV_INCLUDE_DIRS})

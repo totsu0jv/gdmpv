@@ -7,7 +7,7 @@ MPVPlayer::MPVPlayer() :
 		is_buffering(false),
 		texture_needs_update(false) {
 	mpv = nullptr;
-	mpv_gl = nullptr;
+	mpv_ctx = nullptr;
 	current_time = 0.0;
 	duration = 0.0;
 	video_width = 1920;
@@ -16,7 +16,6 @@ MPVPlayer::MPVPlayer() :
 
 
 	set_process(true);
-	initialize_mpv();
 }
 
 MPVPlayer::~MPVPlayer() {
@@ -63,6 +62,8 @@ void MPVPlayer::initialize_mpv() {
 	mpv_set_option_string(mpv, "profile", "fast");
 	mpv_set_option_string(mpv, "video-sync", "display");
 
+	mpv_set_option_string(mpv, "video-sync", "display");
+
 	mpv_set_option_string(mpv, "network-timeout", "15");
 	mpv_set_option_string(mpv, "user-agent", "Stremio");
 
@@ -75,6 +76,9 @@ void MPVPlayer::initialize_mpv() {
 	mpv_set_option_string(mpv, "hr-seek", "yes");
 	mpv_set_option_string(mpv, "hr-seek-demuxer-offset", "1.5");
 	mpv_set_option_string(mpv, "stream-buffer-size", "10M");
+
+	mpv_set_option_string(mpv, "gpu-api", "vulkan");
+	mpv_set_option_string(mpv, "vo", "gpu-next"); // gpu-next is mandatory for good Vulkan support
 
 	// Initialize MPV
 	ret = mpv_initialize(mpv);
@@ -94,13 +98,75 @@ void MPVPlayer::initialize_mpv() {
 	// Request log messages at info level for debugging
 	mpv_request_log_messages(mpv, "info");
 
-	// Set up software rendering context
+	
+    auto* rs = godot::RenderingServer::get_singleton();
+    auto* rd = rs ? rs->get_rendering_device() : nullptr;
+
+	VkPhysicalDeviceFeatures2 features2{};
+	features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+
+	VkPhysicalDeviceTimelineSemaphoreFeatures timeline{};
+	timeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+
+	VkPhysicalDeviceHostQueryResetFeatures host_query{};
+	host_query.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
+
+	features2.pNext = &timeline;
+	timeline.pNext = &host_query;
+
+
+
+	//int vk = rd->get_driver_resource(RenderingDevice::DRIVER_RESOURCE_VULKAN_DEVICE);
+
+	VkInstance vkInstance = reinterpret_cast<VkInstance>(
+        rd->get_driver_resource(godot::RenderingDevice::DRIVER_RESOURCE_VULKAN_INSTANCE, godot::RID(), 0)
+    );
+    VkPhysicalDevice vkPhysicalDevice = reinterpret_cast<VkPhysicalDevice>(
+        rd->get_driver_resource(godot::RenderingDevice::DRIVER_RESOURCE_VULKAN_PHYSICAL_DEVICE, godot::RID(), 0)
+    );
+    VkDevice vkDevice = reinterpret_cast<VkDevice>(
+        rd->get_driver_resource(godot::RenderingDevice::DRIVER_RESOURCE_VULKAN_DEVICE, godot::RID(), 0)
+    );
+
+
+	VkQueue queue = reinterpret_cast<VkQueue>(rd->get_driver_resource(godot::RenderingDevice::DRIVER_RESOURCE_COMMAND_QUEUE, godot::RID(), 0));
+	uint32_t queue_family = rd->get_driver_resource(godot::RenderingDevice::DRIVER_RESOURCE_QUEUE_FAMILY, godot::RID(), 0);
+
+	vkGetPhysicalDeviceFeatures2(vkPhysicalDevice, &features2);
+
+
+	if (!timeline.timelineSemaphore) {
+    	UtilityFunctions::push_error("MPV: timelineSemaphore not enabled by Godot");
+	}
+
+	if (!host_query.hostQueryReset) {
+	    UtilityFunctions::push_error("MPV: hostQueryReset not enabled by Godot");
+	}
+
+
+	mpv_vulkan_init_params vk_params{};
+	vk_params.instance = vkInstance;
+	vk_params.physical_device = vkPhysicalDevice;
+	vk_params.device = vkDevice;
+	vk_params.graphics_queue = queue;
+	vk_params.graphics_queue_family = queue_family;
+	vk_params.get_instance_proc_addr = vkGetInstanceProcAddr;
+	vk_params.features = &features2;
+	//vk_params.extensions = nullptr;
+	//vk_params.num_extensions = 0;
+
+	const char *format = "gpu-next";
+
+
 	mpv_render_param params[] = {
-		{ MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_SW) },
-		{ MPV_RENDER_PARAM_INVALID, nullptr }
+	    { MPV_RENDER_PARAM_API_TYPE, (void*)MPV_RENDER_API_TYPE_VULKAN },
+	    { MPV_RENDER_PARAM_VULKAN_INIT_PARAMS, &vk_params },
+		//{ MPV_RENDER_PARAM_BACKEND, const_cast<char *>(format) },
+	    { MPV_RENDER_PARAM_INVALID, nullptr }
 	};
 
-	ret = mpv_render_context_create(&mpv_gl, mpv, params);
+
+	ret = mpv_render_context_create(&mpv_ctx, mpv, params);
 	if (ret < 0) {
 		UtilityFunctions::push_error(vformat("MPV: Failed to create render context: %s", mpv_error_string(ret)));
 		mpv_terminate_destroy(mpv);
@@ -111,13 +177,13 @@ void MPVPlayer::initialize_mpv() {
 	UtilityFunctions::print("MPV: Render context created successfully");
 
 	// Set update callback
-	mpv_render_context_set_update_callback(mpv_gl, on_mpv_render_update, this);
+	//mpv_render_context_set_update_callback(mpv_ctx, on_mpv_render_update, this);
 }
 
 void MPVPlayer::cleanup_mpv() {
-	if (mpv_gl) {
-		mpv_render_context_free(mpv_gl);
-		mpv_gl = nullptr;
+	if (mpv_ctx) {
+		mpv_render_context_free(mpv_ctx);
+		mpv_ctx = nullptr;
 	}
 
 	if (mpv) {
@@ -134,7 +200,7 @@ void MPVPlayer::on_mpv_render_update(void *ctx) {
 }
 
 void MPVPlayer::update_frame() {
-	if (!mpv_gl) {
+	if (!mpv_ctx) {
 		UtilityFunctions::push_warning("MPV: update_frame called but no render context");
 		return;
 	}
@@ -184,20 +250,20 @@ void MPVPlayer::update_frame() {
 		{ MPV_RENDER_PARAM_INVALID, nullptr }
 	};
 
-	int ret = mpv_render_context_render(mpv_gl, render_params);
+	int ret = mpv_render_context_render(mpv_ctx, render_params);
 	if (ret < 0) {
 		UtilityFunctions::push_error(vformat("MPV: Render failed: %s", mpv_error_string(ret)));
 		return;
 	}
 
-	image->set_data(video_width, video_height, false, Image::FORMAT_RGBA8, frame_buffer);
+/* 	image->set_data(video_width, video_height, false, Image::FORMAT_RGBA8, frame_buffer);
 	if (size_changed) {
 		texture->set_image(image);
 		UtilityFunctions::print("MPV: Texture size updated");
 		size_changed = false;
 	} else {
 		texture->update(image);
-	}
+	} */
 
 }
 
@@ -310,16 +376,79 @@ void MPVPlayer::_notification(int p_what) {
 			break;
 		} 
 	}
+}	
+
+void MPVPlayer::_render_frame() {
+	if (!mpv_ctx) {
+		UtilityFunctions::push_warning("MPV: update_frame called but no render context");
+		return;
+	}
+
+	mpv_render_param render_params[] = {
+    	{ MPV_RENDER_PARAM_VULKAN_FBO, &fbo },
+    	{ MPV_RENDER_PARAM_INVALID, nullptr }
+	};
+
+    mpv_render_context_render(mpv_ctx, render_params);
+}
+
+void MPVPlayer::init_video_texture() {
+	initialize_mpv();
+
+	//img_texture = Texture2DRD::create_from_image(image);
+	RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
+
+	//int vk = rd->get_driver_resource(RenderingDevice::DRIVER_RESOURCE_VULKAN_DEVICE);
+
+	/* VkInstance instance = reinterpret_cast<VkInstance>rd->get_driver_resource(RenderingDevice::DRIVER_RESOURCE_TOPMOST_OBJECT, RID(), 0);
+	VkPhysicalDevice physical_device = (VkPhysicalDevice)rd->get_driver_resource(RenderingDevice::DRIVER_RESOURCE_PHYSICAL_DEVICE, RID(), 0);
+	VkDevice device = (VkDevice)rd->get_driver_resource(RenderingDevice::DRIVER_RESOURCE_LOGICAL_DEVICE, RID(), 0); */
+	VkInstance vkInstance = reinterpret_cast<VkInstance>(
+        rd->get_driver_resource(godot::RenderingDevice::DRIVER_RESOURCE_VULKAN_INSTANCE, godot::RID(), 0)
+    );
+    VkPhysicalDevice vkPhysicalDevice = reinterpret_cast<VkPhysicalDevice>(
+        rd->get_driver_resource(godot::RenderingDevice::DRIVER_RESOURCE_VULKAN_PHYSICAL_DEVICE, godot::RID(), 0)
+    );
+    VkDevice vkDevice = reinterpret_cast<VkDevice>(
+        rd->get_driver_resource(godot::RenderingDevice::DRIVER_RESOURCE_VULKAN_DEVICE, godot::RID(), 0)
+    );
+
+
+	VkQueue queue = reinterpret_cast<VkQueue>(rd->get_driver_resource(godot::RenderingDevice::DRIVER_RESOURCE_COMMAND_QUEUE, godot::RID(), 0));
+	uint32_t queue_family = rd->get_driver_resource(godot::RenderingDevice::DRIVER_RESOURCE_QUEUE_FAMILY, godot::RID(), 0);
+
+	image = Image::create_empty(video_width, video_height, false, Image::FORMAT_RGBA8);
+	texture = RenderingServer::get_singleton()->texture_2d_create(image);
+	VkImage vk_image = (VkImage)rd->texture_get_native_handle(texture);
+	fbo.image = vk_image;
+	fbo.width = video_width;
+	fbo.height = video_height;
+	fbo.format = VK_FORMAT_R8G8B8A8_UNORM;
+
+	mpv_render_param render_params[] = {
+    	{ MPV_RENDER_PARAM_VULKAN_FBO, &fbo },
+    	{ MPV_RENDER_PARAM_INVALID, nullptr }
+	};
+
+
+
+	RenderingServer::get_singleton()->call_on_render_thread(
+	    Callable(this, "_render_frame")
+	);
 }
 
 void MPVPlayer::_ready() {
-	image = Image::create_empty(video_width, video_height, false, Image::FORMAT_RGBA8);
-	texture = ImageTexture::create_from_image(image);
+	if (Engine::get_singleton()->is_editor_hint()) {
+    	return;
+	}
+
+    call_deferred("init_video_texture");
 }
 
 
 void MPVPlayer::_process(double delta) {
-	if (!image.is_valid() || !texture.is_valid())
+	return;
+	if (!img_texture.is_valid())
     	return;
 	// Check if we need to update the texture
 	if (texture_needs_update.load()) {
@@ -335,10 +464,16 @@ void MPVPlayer::_process(double delta) {
 void MPVPlayer::set_target_texture_rect(TextureRect *rect) {
 	target_texture_rect = rect;
 
-	// If we already have a texture, apply it immediately
-	if (target_texture_rect && texture.is_valid()) {
-		target_texture_rect->set_texture(texture);
-	}
+/* 	// If we already have a texture, apply it immediately
+	if (target_texture_rect) {
+		Texture2DRD texture_2d = target_texture_rect->get_texture();
+		if (texture_2d.is_valid()) {
+			texture_2d.set_rid(texture);
+			//target_texture_rect->set_texture(texture_2d);
+		} else {
+			UtilityFunctions::push_warning("MPV: Target TextureRect does not have a valid texture");
+		}
+	} */
 }
 
 void MPVPlayer::load_file(const String &p_path) {
@@ -384,9 +519,9 @@ void MPVPlayer::stop() {
 	mpv_command(mpv, cmd);
 	current_time = 0.0;
 
-	memset(frame_buffer.ptrw(), 0, frame_buffer.size());
+	/* memset(frame_buffer.ptrw(), 0, frame_buffer.size());
 	image->fill(godot::Color(0,0,0));
-	texture->update(image);
+	texture->update(image); */
 }
 
 void MPVPlayer::seek(String seconds, bool relative) {
@@ -423,6 +558,10 @@ void MPVPlayer::set_volume(double p_volume) {
 
 double MPVPlayer::get_volume() const {
 	return get_mpv_property("volume").operator double();
+}
+
+RID MPVPlayer::get_texture_rid() const {
+	return texture;
 }
 
 void MPVPlayer::set_loop(bool p_loop) {
@@ -802,6 +941,9 @@ void MPVPlayer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_audio_track", "id"), &MPVPlayer::set_audio_track);
 	ClassDB::bind_method(D_METHOD("set_subtitle_track", "id"), &MPVPlayer::set_subtitle_track);
+
+	ClassDB::bind_method(D_METHOD("get_texture_rid"), &MPVPlayer::get_texture_rid);
+	ClassDB::bind_method(D_METHOD("init_video_texture"), &MPVPlayer::init_video_texture);
 
 	// Properties
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "volume", PROPERTY_HINT_RANGE, "0,100"), "set_volume", "get_volume");

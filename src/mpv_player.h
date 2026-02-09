@@ -2,13 +2,16 @@
 
 #include <mpv/client.h>
 #include <mpv/render.h>
-#include <mpv/render_gl.h>
+#include <mpv/render_vk.h>
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
-#include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/classes/Texture2DRD.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/classes/rendering_device.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 
 #include <atomic>
 
@@ -18,10 +21,13 @@ class MPVPlayer : public godot::Node {
 	GDCLASS(MPVPlayer, godot::Node)
 
 private:
+	mpv_vulkan_fbo fbo{};
+
 	mpv_handle *mpv;
-	mpv_render_context *mpv_gl;
-	Ref<ImageTexture> texture;
+	mpv_render_context *mpv_ctx;
+	Ref<ImageTexture> img_texture;
 	Ref<Image> image;
+	RID texture;
 
 	double current_time;
 	double duration;
@@ -41,6 +47,7 @@ private:
 	void initialize_mpv();
 	void cleanup_mpv();
 	void update_frame();
+	void _render_frame();
 	static void on_mpv_events(void *ctx);
 	static void on_mpv_render_update(void *ctx);
 
@@ -54,6 +61,8 @@ public:
 
 	virtual void _process(double delta) override;
 	virtual void _ready() override;
+
+	void init_video_texture();
 
 
 	// Playback control
@@ -102,6 +111,8 @@ public:
 
 	bool is_playing() const;
 	bool is_paused() const;
+
+	RID get_texture_rid() const;
 
 	
     void seek(String seconds, bool relative);
